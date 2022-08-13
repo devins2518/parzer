@@ -83,10 +83,10 @@ pub fn SingleValue(comptime T: type, comptime val: T) type {
     return struct {
         _: U = Val,
         pub fn parse(bytes: []const u8, idx: *usize) ParseFnRet(@This()) {
-            return if (T == u8 and eatChar(bytes, idx, val))
-                @This(){}
-            else |e|
-                e;
+            return if (T == u8) blk: {
+                try eatChar(bytes, idx, val);
+                break :blk @This(){};
+            } else |e| e;
         }
     };
 }
