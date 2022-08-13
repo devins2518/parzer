@@ -66,17 +66,6 @@ pub fn Parser(comptime T: type) type {
     };
 }
 
-fn parseInt(comptime T: type, len: usize, comptime radix: u8) ParseFn(T) {
-    return struct {
-        fn f(bytes: []const u8, idx: *usize) ParseFnRet(T) {
-            return if (std.fmt.parseInt(u8, bytes[idx.* .. idx.* + len], radix)) |ret| blk: {
-                idx.* += len;
-                break :blk ret;
-            } else |_| error.UnexpectedToken;
-        }
-    }.f;
-}
-
 pub fn SingleValue(comptime T: type, comptime val: T) type {
     const U = if (stage1) T else void;
     const Val = if (stage1) val else {};
@@ -95,6 +84,17 @@ pub fn eatChar(bytes: []const u8, idx: *usize, char: u8) ParseFnRet(void) {
     return if (bytes[idx.*] == char) {
         idx.* += 1;
     } else error.UnexpectedToken;
+}
+
+fn parseInt(comptime T: type, len: usize, comptime radix: u8) ParseFn(T) {
+    return struct {
+        fn f(bytes: []const u8, idx: *usize) ParseFnRet(T) {
+            return if (std.fmt.parseInt(u8, bytes[idx.* .. idx.* + len], radix)) |ret| blk: {
+                idx.* += len;
+                break :blk ret;
+            } else |_| error.UnexpectedToken;
+        }
+    }.f;
 }
 
 fn isStructOrUnion(comptime T: type) bool {
