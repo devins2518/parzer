@@ -110,7 +110,15 @@ fn parseInt(comptime T: type, len: usize, comptime radix: u8) ParseFn(T) {
 }
 
 fn isStructOrUnion(comptime T: type) bool {
-    return @typeInfo(T) == .Struct or @typeInfo(T) == .Union;
+    return isStruct(T) or isUnion(T);
+}
+
+fn isStruct(comptime T: type) bool {
+    return @typeInfo(T) == .Struct;
+}
+
+fn isUnion(comptime T: type) bool {
+    return @typeInfo(T) == .Union;
 }
 
 test "basic parse - workaround within struct to properly parse" {
@@ -161,6 +169,27 @@ test "basic parse - custom parse fn to properly parse" {
 test "assert SingleValue zero-size" {
     if (!stage1)
         try std.testing.expect(@sizeOf(SingleValue([]const u8, "test")) == 0);
+}
+
+test "parser error" {
+    const Foo = struct {
+        const ParserError = error{foo};
+        bar: struct {
+            const ParserError = error{bar};
+        },
+        foo: u8,
+        baz: union {
+            const ParserError = error{baz};
+            baz: void,
+        },
+    };
+    const FooError = ParseError(Foo);
+    const FooErrorSet = @typeInfo(FooError).ErrorSet.?;
+
+    const ExpectError = error{ UnexpectedEof, UnexpectedToken, foo, bar, baz };
+    const ExpectErrorSet = @typeInfo(ExpectError).ErrorSet.?;
+
+    try std.testing.expectEqualSlices(std.builtin.Type.Error, FooErrorSet, ExpectErrorSet);
 }
 
 test "static analysis" {
