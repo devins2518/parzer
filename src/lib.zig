@@ -2,7 +2,7 @@ const std = @import("std");
 const stage1 = @import("builtin").zig_backend == .stage1;
 
 pub fn ParseFn(comptime T: type) type {
-    return fn ([]const u8, *usize, anytype) ParseFnRet(T);
+    return fn (*[]const u8, anytype) ParseFnRet(T);
 }
 
 pub fn ParseFnRet(comptime T: type) type {
@@ -39,14 +39,14 @@ pub fn Parser(comptime T: type) type {
         const Error = ParseError(T);
 
         fn parse(bytes: []const u8, extra: anytype) !T {
-            var idx: usize = 0;
+            var b = bytes;
             return if (@hasDecl(T, "parse"))
-                T.parse(bytes, &idx, extra)
+                T.parse(&b, extra)
             else
-                parseRest(bytes, &idx, extra);
+                parseRest(&b, extra);
         }
         // null means that parsing will continue for rest of the struct.
-        fn parseWhile(ret: *T, bytes: []const u8, idx: *usize, extra: anytype, comptime stop: ?[]const u8) ParseError(T)!void {
+        fn parseWhile(ret: *T, bytes: *[]const u8, extra: anytype, comptime stop: ?[]const u8) ParseError(T)!void {
             inline for (Fields) |field| {
                 if (stop != null and field.name == stop.?) break;
                 const FieldInfo = @typeInfo(field.field_type);
@@ -57,22 +57,22 @@ pub fn Parser(comptime T: type) type {
                     false;
                 @field(ret, field.name) = switch (FieldInfo) {
                     .Struct => if (has_parser)
-                        try @field(T, field.name ++ "Parser")(bytes, idx, extra)
+                        try @field(T, field.name ++ "Parser")(bytes, extra)
                     else if (has_parse)
-                        try @field(field.field_type, "parse")(bytes, idx, extra)
+                        try @field(field.field_type, "parse")(bytes, extra)
                     else
                         undefined,
                     .Int => if (has_parser)
-                        try @field(T, field.name ++ "Parser")(bytes, idx, extra)
+                        try @field(T, field.name ++ "Parser")(bytes, extra)
                     else
                         undefined,
                     else => @compileError("Unsupported parsing type: " ++ @tagName(FieldInfo)),
                 };
             }
         }
-        fn parseRest(bytes: []const u8, idx: *usize, extra: anytype) ParseFnRet(T) {
+        fn parseRest(bytes: *[]const u8, extra: anytype) ParseFnRet(T) {
             var ret: T = undefined;
-            try parseWhile(&ret, bytes, idx, extra, null);
+            try parseWhile(&ret, bytes, extra, null);
             return ret;
         }
     };
@@ -83,26 +83,26 @@ pub fn SingleValue(comptime T: type, comptime val: T) type {
     const Val = if (stage1) val else {};
     return struct {
         _: U = Val,
-        pub fn parse(bytes: []const u8, idx: *usize, _: anytype) ParseFnRet(@This()) {
+        pub fn parse(bytes: *[]const u8, _: anytype) ParseFnRet(@This()) {
             return if (T == u8) blk: {
-                try eatChar(bytes, idx, val);
+                try eatChar(bytes, val);
                 break :blk @This(){};
             } else |e| e;
         }
     };
 }
 
-pub fn eatChar(bytes: []const u8, idx: *usize, char: u8) ParseFnRet(void) {
-    return if (bytes[idx.*] == char) {
-        idx.* += 1;
+pub fn eatChar(bytes: *[]const u8, char: u8) ParseFnRet(void) {
+    return if (bytes.*[0] == char) {
+        bytes.* = bytes.*[1..];
     } else error.UnexpectedToken;
 }
 
 fn parseInt(comptime T: type, len: usize, comptime radix: u8) ParseFn(T) {
     return struct {
-        fn f(bytes: []const u8, idx: *usize, _: anytype) ParseFnRet(T) {
-            return if (std.fmt.parseInt(u8, bytes[idx.* .. idx.* + len], radix)) |ret| blk: {
-                idx.* += len;
+        fn f(bytes: *[]const u8, _: anytype) ParseFnRet(T) {
+            return if (std.fmt.parseInt(u8, bytes.*[0..len], radix)) |ret| blk: {
+                bytes.* = bytes.*[len..];
                 break :blk ret;
             } else |_| error.UnexpectedToken;
         }
@@ -152,9 +152,9 @@ test "basic parse - custom parse fn to properly parse" {
         const redParser = parseInt(u8, 2, 16);
         const greenParser = parseInt(u8, 2, 16);
         const blueParser = parseInt(u8, 2, 16);
-        pub fn parse(bytes: []const u8, idx: *usize, extra: anytype) ParseFnRet(Self) {
-            try eatChar(bytes, idx, '#');
-            return ColorParser.parseRest(bytes, idx, extra);
+        pub fn parse(bytes: *[]const u8, extra: anytype) ParseFnRet(Self) {
+            try eatChar(bytes, '#');
+            return ColorParser.parseRest(bytes, extra);
         }
     };
 
