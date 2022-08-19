@@ -2,7 +2,7 @@ const std = @import("std");
 const stage1 = @import("builtin").zig_backend == .stage1;
 
 pub fn ParseFn(comptime T: type) type {
-    return fn ([]const u8, *usize) ParseFnRet(T);
+    return fn ([]const u8, *usize, anytype) ParseFnRet(T);
 }
 
 pub fn ParseFnRet(comptime T: type) type {
@@ -26,15 +26,15 @@ pub fn Parser(comptime T: type) type {
     return struct {
         const Error = ParseError(T);
 
-        fn parse(bytes: []const u8) !T {
+        fn parse(bytes: []const u8, extra: anytype) !T {
             var idx: usize = 0;
             return if (@hasDecl(T, "parse"))
-                T.parse(bytes, &idx)
+                T.parse(bytes, &idx, extra)
             else
-                parseRest(bytes, &idx);
+                parseRest(bytes, &idx, extra);
         }
         // null means that parsing will continue for rest of the struct.
-        fn parseWhile(ret: *T, bytes: []const u8, idx: *usize, comptime stop: ?[]const u8) ParseFnRet(void) {
+        fn parseWhile(ret: *T, bytes: []const u8, idx: *usize, extra: anytype, comptime stop: ?[]const u8) ParseFnRet(void) {
             inline for (Fields) |field| {
                 if (stop != null and field.name == stop.?) break;
                 const FieldInfo = @typeInfo(field.field_type);
@@ -45,22 +45,22 @@ pub fn Parser(comptime T: type) type {
                     false;
                 @field(ret, field.name) = switch (FieldInfo) {
                     .Struct => if (has_parser)
-                        try @field(T, field.name ++ "Parser")(bytes, idx)
+                        try @field(T, field.name ++ "Parser")(bytes, idx, extra)
                     else if (has_parse)
-                        try @field(field.field_type, "parse")(bytes, idx)
+                        try @field(field.field_type, "parse")(bytes, idx, extra)
                     else
                         undefined,
                     .Int => if (has_parser)
-                        try @field(T, field.name ++ "Parser")(bytes, idx)
+                        try @field(T, field.name ++ "Parser")(bytes, idx, extra)
                     else
                         undefined,
                     else => @compileError("Unsupported parsing type: " ++ @tagName(FieldInfo)),
                 };
             }
         }
-        fn parseRest(bytes: []const u8, idx: *usize) ParseFnRet(T) {
+        fn parseRest(bytes: []const u8, idx: *usize, extra: anytype) ParseFnRet(T) {
             var ret: T = undefined;
-            try parseWhile(&ret, bytes, idx, null);
+            try parseWhile(&ret, bytes, idx, extra, null);
             return ret;
         }
     };
@@ -71,7 +71,7 @@ pub fn SingleValue(comptime T: type, comptime val: T) type {
     const Val = if (stage1) val else {};
     return struct {
         _: U = Val,
-        pub fn parse(bytes: []const u8, idx: *usize) ParseFnRet(@This()) {
+        pub fn parse(bytes: []const u8, idx: *usize, _: anytype) ParseFnRet(@This()) {
             return if (T == u8) blk: {
                 try eatChar(bytes, idx, val);
                 break :blk @This(){};
@@ -88,7 +88,7 @@ pub fn eatChar(bytes: []const u8, idx: *usize, char: u8) ParseFnRet(void) {
 
 fn parseInt(comptime T: type, len: usize, comptime radix: u8) ParseFn(T) {
     return struct {
-        fn f(bytes: []const u8, idx: *usize) ParseFnRet(T) {
+        fn f(bytes: []const u8, idx: *usize, _: anytype) ParseFnRet(T) {
             return if (std.fmt.parseInt(u8, bytes[idx.* .. idx.* + len], radix)) |ret| blk: {
                 idx.* += len;
                 break :blk ret;
@@ -116,7 +116,7 @@ test "basic parse - workaround within struct to properly parse" {
     const ColorParser = Parser(Color);
 
     const expected = Color{ .red = 47, .green = 20, .blue = 223 };
-    const parsed = try ColorParser.parse("#2F14DF");
+    const parsed = try ColorParser.parse("#2F14DF", .{});
 
     try std.testing.expectEqual(parsed, expected);
 }
@@ -132,16 +132,16 @@ test "basic parse - custom parse fn to properly parse" {
         const redParser = parseInt(u8, 2, 16);
         const greenParser = parseInt(u8, 2, 16);
         const blueParser = parseInt(u8, 2, 16);
-        pub fn parse(bytes: []const u8, idx: *usize) ParseFnRet(Self) {
+        pub fn parse(bytes: []const u8, idx: *usize, extra: anytype) ParseFnRet(Self) {
             try eatChar(bytes, idx, '#');
-            return ColorParser.parseRest(bytes, idx);
+            return ColorParser.parseRest(bytes, idx, extra);
         }
     };
 
     const ColorParser = Parser(Color);
 
     const expected = Color{ .red = 47, .green = 20, .blue = 223 };
-    const parsed = try ColorParser.parse("#2F14DF");
+    const parsed = try ColorParser.parse("#2F14DF", .{});
 
     try std.testing.expectEqual(parsed, expected);
 }
