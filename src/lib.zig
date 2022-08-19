@@ -10,8 +10,20 @@ pub fn ParseFnRet(comptime T: type) type {
 }
 
 pub fn ParseError(comptime T: type) type {
-    _ = T;
-    return error{ UnexpectedEof, UnexpectedToken };
+    var errors = error{ UnexpectedEof, UnexpectedToken };
+    if (isStructOrUnion(T)) {
+        const TyInfo = @typeInfo(T);
+        if (@hasDecl(T, "ParserError"))
+            errors = errors || T.ParserError;
+
+        const Fields = if (isStruct(T)) TyInfo.Struct.fields else TyInfo.Union.fields;
+        for (Fields) |field| {
+            if (isStructOrUnion(field.field_type))
+                errors = errors || ParseError(field.field_type);
+        }
+    }
+
+    return errors;
 }
 
 pub fn Parser(comptime T: type) type {
@@ -34,7 +46,7 @@ pub fn Parser(comptime T: type) type {
                 parseRest(bytes, &idx, extra);
         }
         // null means that parsing will continue for rest of the struct.
-        fn parseWhile(ret: *T, bytes: []const u8, idx: *usize, extra: anytype, comptime stop: ?[]const u8) ParseFnRet(void) {
+        fn parseWhile(ret: *T, bytes: []const u8, idx: *usize, extra: anytype, comptime stop: ?[]const u8) ParseError(T)!void {
             inline for (Fields) |field| {
                 if (stop != null and field.name == stop.?) break;
                 const FieldInfo = @typeInfo(field.field_type);
