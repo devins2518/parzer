@@ -20,11 +20,6 @@ jobs:
       with:
         version: master
 
-    - name: Test 32 bit
-      run: |
-        zig build test -Dtarget=i386-linux-musl --prefix tmp
-        zig build test -Dtarget=i386-linux-musl --prefix tmp -fno-stage1
-
     - name: Test 64 bit
       run: |
         zig build test -Dtarget=x86_64-linux-musl
