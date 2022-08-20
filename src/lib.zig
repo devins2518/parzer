@@ -14,7 +14,7 @@ pub fn getChildParseFn(comptime T: type, comptime field: anytype) ParseFn(field.
     else
         false;
     return switch (FieldInfo) {
-        .Struct => if (has_parser)
+        .Struct, .Union => if (has_parser)
             @field(T, field.name ++ "Parser")
         else if (has_parse)
             @field(Field, "parse")
@@ -92,7 +92,19 @@ pub fn Parser(comptime T: type) type {
             var ret: T = undefined;
             inline for (Fields) |field| {
                 if (stop != null and field.name == stop.?) break;
-                @field(ret, field.name) = try getChildParseFn(T, field)(bytes, extra);
+                const parseFn = getChildParseFn(T, field);
+                if (comptime isStruct(T)) {
+                    @field(ret, field.name) = try parseFn(bytes, extra);
+                } else if (comptime isUnion(T)) {
+                    const old_bytes = bytes.*;
+                    const maybe_parsed = parseFn(bytes, extra);
+                    if (maybe_parsed) |parsed| {
+                        ret = @unionInit(T, field.name, parsed);
+                        break;
+                    } else |_| {
+                        bytes.* = old_bytes;
+                    }
+                } else unreachable;
             }
             return ret;
         }
@@ -191,7 +203,9 @@ pub fn assertExtraHasAllocator(extra: anytype) void {
 fn parseInt(comptime T: type, len: usize, comptime radix: u8) ParseFn(T) {
     return struct {
         fn f(bytes: *[]const u8, _: anytype) ParseFnRet(T) {
-            return if (std.fmt.parseInt(u8, bytes.*[0..len], radix)) |ret| blk: {
+            return if (bytes.len < len)
+                error.UnexpectedEof
+            else if (std.fmt.parseInt(u8, bytes.*[0..len], radix)) |ret| blk: {
                 bytes.* = bytes.*[len..];
                 break :blk ret;
             } else |_| error.UnexpectedToken;
@@ -303,6 +317,80 @@ test "basic parse - pointers" {
     defer parsed.deinit(std.testing.allocator);
 
     try std.testing.expectEqual(expected.a.*, parsed.a.*);
+}
+
+test "basic parse - union" {
+    const Color = union(enum) {
+        double: struct {
+            hex: SingleValue(u8, '#') = .{},
+            red: u8,
+            green: u8,
+            blue: u8,
+            const redParser = parseInt(u8, 2, 16);
+            const greenParser = parseInt(u8, 2, 16);
+            const blueParser = parseInt(u8, 2, 16);
+        },
+        single: struct {
+            hex: SingleValue(u8, '#') = .{},
+            red: u8,
+            green: u8,
+            blue: u8,
+            const redParser = parseInt(u8, 1, 16);
+            const greenParser = parseInt(u8, 1, 16);
+            const blueParser = parseInt(u8, 1, 16);
+        },
+    };
+
+    const ColorParser = Parser(Color);
+
+    {
+        const expected = Color{ .single = .{ .red = 0xa, .green = 0xb, .blue = 0xc } };
+        const parsed = try ColorParser.parse("#abc", .{});
+        try std.testing.expectEqual(parsed, expected);
+    }
+    {
+        const expected = Color{ .double = .{ .red = 0x2f, .green = 0x14, .blue = 0xdf } };
+        const parsed = try ColorParser.parse("#2F14DF", .{});
+        try std.testing.expectEqual(parsed, expected);
+    }
+}
+
+test "basic parse - union within struct" {
+    const Color = struct {
+        values: union(enum) {
+            double: struct {
+                hex: SingleValue(u8, '#') = .{},
+                red: u8,
+                green: u8,
+                blue: u8,
+                const redParser = parseInt(u8, 2, 16);
+                const greenParser = parseInt(u8, 2, 16);
+                const blueParser = parseInt(u8, 2, 16);
+            },
+            single: struct {
+                hex: SingleValue(u8, '#') = .{},
+                red: u8,
+                green: u8,
+                blue: u8,
+                const redParser = parseInt(u8, 1, 16);
+                const greenParser = parseInt(u8, 1, 16);
+                const blueParser = parseInt(u8, 1, 16);
+            },
+        },
+    };
+
+    const ColorParser = Parser(Color);
+
+    {
+        const expected = Color{ .values = .{ .single = .{ .red = 0xa, .green = 0xb, .blue = 0xc } } };
+        const parsed = try ColorParser.parse("#abc", .{});
+        try std.testing.expectEqual(parsed, expected);
+    }
+    {
+        const expected = Color{ .values = .{ .double = .{ .red = 0x2f, .green = 0x14, .blue = 0xdf } } };
+        const parsed = try ColorParser.parse("#2F14DF", .{});
+        try std.testing.expectEqual(parsed, expected);
+    }
 }
 
 test "assert SingleValue zero-size" {
