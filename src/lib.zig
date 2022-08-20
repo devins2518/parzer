@@ -5,7 +5,7 @@ pub fn ParseFn(comptime T: type) type {
     return fn (*[]const u8, anytype) ParseFnRet(T);
 }
 
-pub fn getChildParseFn(comptime T: type, comptime field: anytype) ParseFn(T) {
+pub fn getChildParseFn(comptime T: type, comptime field: anytype) ParseFn(field.field_type) {
     const Field = field.field_type;
     const FieldInfo = @typeInfo(Field);
     const has_parser = @hasDecl(T, field.name ++ "Parser");
@@ -24,6 +24,20 @@ pub fn getChildParseFn(comptime T: type, comptime field: anytype) ParseFn(T) {
             @field(T, field.name ++ "Parser")
         else
             @compileError("Parser not found for " ++ @typeName(T) ++ "." ++ @typeName(field.field_type)),
+        .Pointer => |Ptr| if (Ptr.size == .One and Ptr.is_const)
+            struct {
+                fn f(bytes: *[]const u8, extra: anytype) ParseFnRet(field.field_type) {
+                    const Child = Ptr.child;
+                    assertExtraHasAllocator(extra);
+                    const parseFn = getParseFn(Child);
+                    const allocator = extra.allocator;
+                    const ptr = try allocator.create(Child);
+                    ptr.* = try parseFn(bytes, extra);
+                    return ptr;
+                }
+            }.f
+        else
+            @compileError("Unsupported pointer parsing type: Pointer.size == " ++ @tagName(FieldInfo.Pointer.size)),
         else => @compileError("Unsupported parsing type: " ++ @tagName(FieldInfo)),
     };
 }
@@ -40,17 +54,18 @@ pub fn ParseFnRet(comptime T: type) type {
 }
 
 pub fn ParseError(comptime T: type) type {
+    const TyInfo = @typeInfo(T);
     var errors = error{ UnexpectedEof, UnexpectedToken };
     if (isStructOrUnion(T)) {
-        const TyInfo = @typeInfo(T);
         if (@hasDecl(T, "ParserError"))
             errors = errors || T.ParserError;
 
         const Fields = if (isStruct(T)) TyInfo.Struct.fields else TyInfo.Union.fields;
         for (Fields) |field| {
-            if (isStructOrUnion(field.field_type))
-                errors = errors || ParseError(field.field_type);
+            errors = errors || ParseError(field.field_type);
         }
+    } else if (TyInfo == .Pointer) {
+        errors = errors || std.mem.Allocator.Error || ParseError(TyInfo.Pointer.child);
     }
 
     return errors;
@@ -269,6 +284,25 @@ test "basic parse - one or more" {
     defer parsed.a.deinit(std.testing.allocator);
 
     try std.testing.expectEqualSlices(a, parsed.a.rest, expected.a.rest);
+}
+
+test "basic parse - pointers" {
+    const a = SingleValue(u8, 'a');
+    const APtrs = struct {
+        a: *const a,
+
+        fn deinit(self: @This(), allocator: std.mem.Allocator) void {
+            allocator.destroy(self.a);
+        }
+    };
+
+    const AParser = Parser(APtrs);
+
+    const expected = APtrs{ .a = &.{} };
+    const parsed = try AParser.parse("aaab", .{ .allocator = std.testing.allocator });
+    defer parsed.deinit(std.testing.allocator);
+
+    try std.testing.expectEqual(expected.a.*, parsed.a.*);
 }
 
 test "assert SingleValue zero-size" {
