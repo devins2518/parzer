@@ -1,6 +1,8 @@
 const std = @import("std");
 
 pub fn build(b: *std.build.Builder) void {
+    // TODO: allocating ZSTs is kinda broken on stage2
+    b.use_stage1 = true;
     const mode = b.standardReleaseOptions();
     const target = b.standardTargetOptions(.{});
 
