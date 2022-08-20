@@ -107,6 +107,36 @@ pub fn eatChar(bytes: *[]const u8, char: u8) ParseFnRet(void) {
     } else error.UnexpectedToken;
 }
 
+pub fn OneOrMore(comptime T: type) type {
+    return struct {
+        const ParserError = std.mem.Allocator.Error || ParseError(T);
+        first: T,
+        rest: []const T,
+
+        fn parse(bytes: *[]const u8, extra: anytype) ParseFnRet(@This()) {
+            assertExtraHasAllocator(extra);
+            const allocator = extra.allocator;
+            const parseFn = getParseFn(T);
+            const first = if (parseFn(bytes, extra)) |t|
+                t
+            else |_|
+                return error.UnexpectedToken;
+
+            var list = std.ArrayList(T).init(allocator);
+            while (true) {
+                const t = parseFn(bytes, extra);
+                if (t) |ok|
+                    try list.append(ok)
+                else |_|
+                    return @This(){ .first = first, .rest = list.toOwnedSlice() };
+            }
+        }
+        fn deinit(self: @This(), allocator: std.mem.Allocator) void {
+            allocator.free(self.rest);
+        }
+    };
+}
+
 pub fn ZeroOrMore(comptime T: type) type {
     return struct {
         const ParserError = std.mem.Allocator.Error || ParseError(T);
@@ -220,6 +250,21 @@ test "basic parse - zero or more" {
     const AParser = Parser(A);
 
     const expected = A{ .a = .{ .rest = &.{ .{}, .{}, .{} } } };
+    const parsed = try AParser.parse("aaab", .{ .allocator = std.testing.allocator });
+    defer parsed.a.deinit(std.testing.allocator);
+
+    try std.testing.expectEqualSlices(a, parsed.a.rest, expected.a.rest);
+}
+
+test "basic parse - one or more" {
+    const a = SingleValue(u8, 'a');
+    const A = struct {
+        a: OneOrMore(a),
+    };
+
+    const AParser = Parser(A);
+
+    const expected = A{ .a = .{ .first = .{}, .rest = &.{ .{}, .{} } } };
     const parsed = try AParser.parse("aaab", .{ .allocator = std.testing.allocator });
     defer parsed.a.deinit(std.testing.allocator);
 
