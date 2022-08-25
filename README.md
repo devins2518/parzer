@@ -1,4 +1,4 @@
 # parzer
-[![Test](https://github.com/devins2518/parzer/actions/workflows/test.yml/badge.svg)](https://github.com/devins2518/parzer/actions/workflows/test.yml)
+[![Test](https://github.com/devins2518/parzer/actions/workflows/test.yml/badge.svg)](http://github.com/devins2518/parzer/actions/workflows/test.yml)
 
-A parsing library for Zig.
+A structural parsing library for Zig. ~~Ab~~using Zig's powerful metaprogramming to create powerful, easy to create parsers.
