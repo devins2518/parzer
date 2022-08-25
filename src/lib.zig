@@ -134,6 +134,30 @@ pub fn eatChar(bytes: *[]const u8, char: u8) ParseFnRet(void) {
     } else error.UnexpectedToken;
 }
 
+// TODO: Investigate ways to make this better
+// OneOf(u8, &.{0x00, 0x01}) will create union { @"0", @"1" }; which isn't great to work with.
+pub fn OneOf(comptime T: type, slice: []const T) type {
+    const Type = std.builtin.Type;
+    const Union = Type.Union;
+    const Decl = Type.Declaration;
+    const Field = Type.UnionField;
+    var Fields: [slice.len]Field = undefined;
+    inline for (slice) |ty, i| {
+        const name = std.fmt.comptimePrint("{}", .{ty});
+        Fields[i] = Field{
+            .name = name,
+            .field_type = SingleValue(T, ty),
+            .alignment = @alignOf(T),
+        };
+    }
+    return @Type(Type{ .Union = Union{
+        .layout = .Auto,
+        .tag_type = null,
+        .fields = &Fields,
+        .decls = &[_]Decl{},
+    } });
+}
+
 pub fn OneOrMore(comptime T: type) type {
     return struct {
         const ParserError = std.mem.Allocator.Error || ParseError(T);
@@ -391,6 +415,24 @@ test "basic parse - union within struct" {
         const parsed = try ColorParser.parse("#2F14DF", .{});
         try std.testing.expectEqual(parsed, expected);
     }
+}
+
+test "basic parse - one of" {
+    const Control = struct {
+        cntrl: OneOf(u8, &[_]u8{
+            0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07,
+            0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f,
+            0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17,
+            0x18, 0x19, 0x1a, 0x1b, 0x1c, 0x1d, 0x1e, 0x1f,
+            0x7f,
+        }),
+    };
+
+    const ControlParser = Parser(Control);
+
+    const expected = Control{ .cntrl = .{ .@"0" = .{} } };
+    const parsed = try ControlParser.parse("\x00", .{});
+    try std.testing.expectEqual(parsed, expected);
 }
 
 test "assert SingleValue zero-size" {
