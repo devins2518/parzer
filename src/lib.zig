@@ -144,11 +144,19 @@ pub fn OneOf(comptime T: type, slice: []const T) type {
     var Fields: [slice.len]Field = undefined;
     inline for (slice) |ty, i| {
         const name = std.fmt.comptimePrint("{}", .{ty});
-        Fields[i] = Field{
-            .name = name,
-            .field_type = SingleValue(T, ty),
-            .alignment = @alignOf(T),
-        };
+        if (T == type) {
+            Fields[i] = Field{
+                .name = name,
+                .field_type = ty,
+                .alignment = @alignOf(ty),
+            };
+        } else {
+            Fields[i] = Field{
+                .name = name,
+                .field_type = SingleValue(T, ty),
+                .alignment = @alignOf(T),
+            };
+        }
     }
     return @Type(Type{ .Union = Union{
         .layout = .Auto,
@@ -157,6 +165,16 @@ pub fn OneOf(comptime T: type, slice: []const T) type {
         .decls = &[_]Decl{},
     } });
 }
+
+// TODO
+// pub fn OneOfNamed(comptime T: type, slice: []const T) type {
+//     const TyInfo = @typeInfo(ty);
+//     Fields[i] = Field{
+//         .name = TyInfo.Struct.fields[0].name,
+//         .field_type = TyInfo.Struct.fields[0].field_type,
+//         .alignment = @alignOf(TyInfo.Struct.fields[0].field_type),
+//     };
+// }
 
 pub fn OneOrMore(comptime T: type) type {
     return struct {
@@ -433,6 +451,28 @@ test "basic parse - one of" {
     const expected = Control{ .cntrl = .{ .@"0" = .{} } };
     const parsed = try ControlParser.parse("\x00", .{});
     try std.testing.expectEqual(parsed, expected);
+}
+
+test "basic parse - one of types" {
+    const Slash = struct {
+        slash: OneOf(type, &[_]type{
+            SingleValue(u8, '\\'),
+            SingleValue(u8, '/'),
+        }),
+    };
+
+    const SlashParser = Parser(Slash);
+
+    {
+        const expected = Slash{ .slash = .{ .@"SingleValue(u8,92)" = .{} } };
+        const parsed = try SlashParser.parse("\\", .{});
+        try std.testing.expectEqual(parsed, expected);
+    }
+    {
+        const expected = Slash{ .slash = .{ .@"SingleValue(u8,47)" = .{} } };
+        const parsed = try SlashParser.parse("/", .{});
+        try std.testing.expectEqual(parsed, expected);
+    }
 }
 
 test "assert SingleValue zero-size" {
