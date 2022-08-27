@@ -166,16 +166,6 @@ pub fn OneOf(comptime T: type, slice: []const T) type {
     } });
 }
 
-// TODO
-// pub fn OneOfNamed(comptime T: type, slice: []const T) type {
-//     const TyInfo = @typeInfo(ty);
-//     Fields[i] = Field{
-//         .name = TyInfo.Struct.fields[0].name,
-//         .field_type = TyInfo.Struct.fields[0].field_type,
-//         .alignment = @alignOf(TyInfo.Struct.fields[0].field_type),
-//     };
-// }
-
 pub fn OneOrMore(comptime T: type) type {
     return struct {
         const ParserError = std.mem.Allocator.Error || ParseError(T);
