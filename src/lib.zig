@@ -73,7 +73,8 @@ pub fn ParseError(comptime T: type) type {
 
 pub fn Parser(comptime T: type) type {
     const TyInfo = @typeInfo(T);
-    if (!isStructOrUnion(T)) @compileError("Parser() can only parse into structs or unions. Found: " ++ @tagName(TyInfo));
+    if (comptime !isStructOrUnion(T)) @compileError("Parser() can only parse into structs or unions. Found: " ++ @tagName(TyInfo));
+    if (comptime isUnion(T) and TyInfo.Union.tag_type == null) @compileError("Parser() cannot parse an untagged union. Found: " ++ @typeName(T));
     const Fields = switch (TyInfo) {
         .Struct => |s| s.fields,
         .Union => |u| u.fields,
@@ -139,29 +140,32 @@ pub fn eatChar(bytes: *[]const u8, char: u8) ParseFnRet(void) {
 pub fn OneOf(comptime T: type, slice: []const T) type {
     const Type = std.builtin.Type;
     const Union = Type.Union;
+    const Enum = Type.Enum;
     const Decl = Type.Declaration;
-    const Field = Type.UnionField;
-    var Fields: [slice.len]Field = undefined;
+    const UnionField = Type.UnionField;
+    const EnumField = Type.EnumField;
+    var UnionFields: [slice.len]UnionField = undefined;
+    var EnumFields: [slice.len]EnumField = undefined;
     inline for (slice) |ty, i| {
         const name = std.fmt.comptimePrint("{}", .{ty});
         if (T == type) {
-            Fields[i] = Field{
-                .name = name,
-                .field_type = ty,
-                .alignment = @alignOf(ty),
-            };
+            UnionFields[i] = UnionField{ .name = name, .field_type = ty, .alignment = @alignOf(ty) };
+            EnumFields[i] = EnumField{ .name = name, .value = i };
         } else {
-            Fields[i] = Field{
-                .name = name,
-                .field_type = SingleValue(T, ty),
-                .alignment = @alignOf(T),
-            };
+            UnionFields[i] = UnionField{ .name = name, .field_type = SingleValue(T, ty), .alignment = @alignOf(T) };
+            EnumFields[i] = EnumField{ .name = name, .value = i };
         }
     }
     return @Type(Type{ .Union = Union{
         .layout = .Auto,
-        .tag_type = null,
-        .fields = &Fields,
+        .tag_type = @Type(Type{ .Enum = Enum{
+            .layout = .Auto,
+            .tag_type = std.meta.Int(.unsigned, std.math.ceilPowerOfTwo(usize, EnumFields.len) catch unreachable),
+            .fields = &EnumFields,
+            .decls = &[_]Decl{},
+            .is_exhaustive = true,
+        } }),
+        .fields = &UnionFields,
         .decls = &[_]Decl{},
     } });
 }
