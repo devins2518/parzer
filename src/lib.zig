@@ -83,12 +83,12 @@ pub fn Parser(comptime T: type) type {
     return struct {
         const Error = ParseError(T);
 
-        fn parse(bytes: []const u8, extra: anytype) ParseFnRet(T) {
+        pub fn parse(bytes: []const u8, extra: anytype) ParseFnRet(T) {
             var b = bytes;
             return getParseFn(T)(&b, extra);
         }
         // null means that parsing will continue for rest of the struct.
-        fn parseWhile(bytes: *[]const u8, extra: anytype, comptime stop: ?[]const u8) ParseFnRet(T) {
+        pub fn parseWhile(bytes: *[]const u8, extra: anytype, comptime stop: ?[]const u8) ParseFnRet(T) {
             var ret: T = undefined;
             inline for (Fields) |field| {
                 if (stop != null and field.name == stop.?) break;
@@ -108,7 +108,7 @@ pub fn Parser(comptime T: type) type {
             }
             return ret;
         }
-        fn parseRest(bytes: *[]const u8, extra: anytype) ParseFnRet(T) {
+        pub fn parseRest(bytes: *[]const u8, extra: anytype) ParseFnRet(T) {
             return parseWhile(bytes, extra, null);
         }
     };
@@ -172,7 +172,7 @@ pub fn OneOrMore(comptime T: type) type {
         first: T,
         rest: []const T,
 
-        fn parse(bytes: *[]const u8, extra: anytype) ParseFnRet(@This()) {
+        pub fn parse(bytes: *[]const u8, extra: anytype) ParseFnRet(@This()) {
             assertExtraHasAllocator(extra);
             const allocator = extra.allocator;
             const parseFn = getParseFn(T);
@@ -201,7 +201,7 @@ pub fn ZeroOrMore(comptime T: type) type {
         const ParserError = std.mem.Allocator.Error || ParseError(T);
         rest: []const T,
 
-        fn parse(bytes: *[]const u8, extra: anytype) ParseFnRet(@This()) {
+        pub fn parse(bytes: *[]const u8, extra: anytype) ParseFnRet(@This()) {
             assertExtraHasAllocator(extra);
             const allocator = extra.allocator;
             var list = std.ArrayList(T).init(allocator);
@@ -232,7 +232,7 @@ pub fn assertExtraHasAllocator(extra: anytype) void {
     } else @compileError("Extra must have a field named allocator.");
 }
 
-fn parseInt(comptime T: type, len: usize, comptime radix: u8) ParseFn(T) {
+pub fn parseInt(comptime T: type, len: usize, comptime radix: u8) ParseFn(T) {
     return struct {
         fn f(bytes: *[]const u8, _: anytype) ParseFnRet(T) {
             return if (bytes.len < len)
