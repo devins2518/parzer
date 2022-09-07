@@ -1,4 +1,5 @@
 const std = @import("std");
+const utils = @import("utils.zig");
 const stage1 = @import("builtin").zig_backend == .stage1;
 
 pub fn ParseFn(comptime T: type) type {
@@ -9,7 +10,7 @@ pub fn getChildParseFn(comptime T: type, comptime field: anytype) ParseFn(field.
     const Field = field.field_type;
     const FieldInfo = @typeInfo(Field);
     const has_parser = @hasDecl(T, field.name ++ "Parser");
-    const has_parse = if (comptime isStructOrUnion(Field))
+    const has_parse = if (comptime utils.isStructOrUnion(Field))
         @hasDecl(Field, "parse")
     else
         false;
@@ -56,11 +57,11 @@ pub fn ParseFnRet(comptime T: type) type {
 pub fn ParseError(comptime T: type) type {
     const TyInfo = @typeInfo(T);
     var errors = error{ UnexpectedEof, UnexpectedToken };
-    if (isStructOrUnion(T)) {
+    if (comptime utils.isStructOrUnion(T)) {
         if (@hasDecl(T, "ParserError"))
             errors = errors || T.ParserError;
 
-        const Fields = if (isStruct(T)) TyInfo.Struct.fields else TyInfo.Union.fields;
+        const Fields = if (comptime utils.isStruct(T)) TyInfo.Struct.fields else TyInfo.Union.fields;
         for (Fields) |field| {
             errors = errors || ParseError(field.field_type);
         }
@@ -73,8 +74,8 @@ pub fn ParseError(comptime T: type) type {
 
 pub fn Parser(comptime T: type) type {
     const TyInfo = @typeInfo(T);
-    if (comptime !isStructOrUnion(T)) @compileError("Parser() can only parse into structs or unions. Found: " ++ @tagName(TyInfo));
-    if (comptime isUnion(T) and TyInfo.Union.tag_type == null) @compileError("Parser() cannot parse an untagged union. Found: " ++ @typeName(T));
+    if (comptime !utils.isStructOrUnion(T)) @compileError("Parser() can only parse into structs or unions. Found: " ++ @tagName(TyInfo));
+    if (comptime utils.isUnion(T) and TyInfo.Union.tag_type == null) @compileError("Parser() cannot parse an untagged union. Found: " ++ @typeName(T));
     const Fields = switch (TyInfo) {
         .Struct => |s| s.fields,
         .Union => |u| u.fields,
@@ -94,9 +95,9 @@ pub fn Parser(comptime T: type) type {
             inline for (Fields) |field| {
                 if (stop != null and field.name == stop.?) break;
                 const parseFn = getChildParseFn(T, field);
-                if (comptime isStruct(T)) {
+                if (comptime utils.isStruct(T)) {
                     @field(ret, field.name) = try parseFn(bytes, extra);
-                } else if (comptime isUnion(T)) {
+                } else if (comptime utils.isUnion(T)) {
                     const old_bytes = bytes.*;
                     const maybe_parsed = parseFn(bytes, extra);
                     if (maybe_parsed) |parsed| {
@@ -160,7 +161,7 @@ pub fn OneOf(comptime T: type, slice: []const T) type {
         .layout = .Auto,
         .tag_type = @Type(Type{ .Enum = Enum{
             .layout = .Auto,
-            .tag_type = std.meta.Int(.unsigned, std.math.ceilPowerOfTwo(usize, EnumFields.len) catch unreachable),
+            .tag_type = std.math.IntFittingRange(0, EnumFields.len - 1),
             .fields = &EnumFields,
             .decls = &[_]Decl{},
             .is_exhaustive = true,
@@ -226,7 +227,7 @@ pub fn ZeroOrMore(comptime T: type) type {
 
 pub fn assertExtraHasAllocator(extra: anytype) void {
     const T = @TypeOf(extra);
-    if (!comptime isStruct(T)) @compileError("Extra must be a struct");
+    if (!comptime utils.isStruct(T)) @compileError("Extra must be a struct");
     if (@hasField(T, "allocator")) {
         const AllocatorTy = @TypeOf(extra.allocator);
         if (AllocatorTy == std.mem.Allocator)
@@ -247,18 +248,6 @@ pub fn parseInt(comptime T: type, len: usize, comptime radix: u8) ParseFn(T) {
             } else |_| error.UnexpectedToken;
         }
     }.f;
-}
-
-fn isStructOrUnion(comptime T: type) bool {
-    return isStruct(T) or isUnion(T);
-}
-
-fn isStruct(comptime T: type) bool {
-    return @typeInfo(T) == .Struct;
-}
-
-fn isUnion(comptime T: type) bool {
-    return @typeInfo(T) == .Union;
 }
 
 test "basic parse - workaround within struct to properly parse" {
