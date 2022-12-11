@@ -138,7 +138,7 @@ pub fn eatChar(bytes: *[]const u8, char: u8) ParseFnRet(void) {
 
 // TODO: Investigate ways to make this better
 // OneOf(u8, &.{0x00, 0x01}) will create union { @"0", @"1" }; which isn't great to work with.
-pub fn OneOf(comptime T: type, slice: []const T) type {
+pub fn OneOf(comptime T: type, comptime slice: []const T) type {
     const Type = std.builtin.Type;
     const Union = Type.Union;
     const Enum = Type.Enum;
@@ -178,7 +178,7 @@ pub fn OneOrMore(comptime T: type) type {
         rest: []const T,
 
         pub fn parse(bytes: *[]const u8, extra: anytype) ParseFnRet(@This()) {
-            assertExtraHasAllocator(extra);
+            comptime assertExtraHasAllocator(extra);
             const allocator = extra.allocator;
             const parseFn = getParseFn(T);
             const first = if (parseFn(bytes, extra)) |t|
