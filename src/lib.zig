@@ -1,6 +1,5 @@
 const std = @import("std");
 const utils = @import("utils.zig");
-const stage1 = @import("builtin").zig_backend == .stage1;
 
 pub fn ParseFn(comptime T: type) type {
     return fn (*[]const u8, anytype) ParseFnRet(T);
@@ -117,10 +116,8 @@ pub fn Parser(comptime T: type) type {
 }
 
 pub fn SingleValue(comptime T: type, comptime val: T) type {
-    const U = if (stage1) T else void;
-    const Val = if (stage1) val else {};
     return struct {
-        _: U = Val,
+        _: u1 = 0,
         pub fn parse(bytes: *[]const u8, _: anytype) ParseFnRet(@This()) {
             return if (T == u8) blk: {
                 try eatChar(bytes, val);
@@ -175,7 +172,7 @@ pub fn OneOrMore(comptime T: type) type {
     return struct {
         const ParserError = std.mem.Allocator.Error || ParseError(T);
         first: T,
-        rest: if (@sizeOf(T) > 0) []const T else usize,
+        rest: []const T,
 
         pub fn parse(bytes: *[]const u8, extra: anytype) ParseFnRet(@This()) {
             comptime assertExtraHasAllocator(extra);
@@ -186,25 +183,17 @@ pub fn OneOrMore(comptime T: type) type {
             else |_|
                 return error.UnexpectedToken;
 
-            var list = if (@sizeOf(T) > 0) std.ArrayList(T).init(allocator) else @as(usize, 0);
+            var list = std.ArrayList(T).init(allocator);
             while (true) {
                 const t = parseFn(bytes, extra);
-                if (t) |ok| {
-                    if (@sizeOf(T) > 0)
-                        try list.append(ok)
-                    else
-                        list += 1;
-                } else |_| {
-                    return if (@sizeOf(T) > 0)
-                        @This(){ .first = first, .rest = try list.toOwnedSlice() }
-                    else
-                        @This(){ .first = first, .rest = list };
-                }
+                if (t) |ok|
+                    try list.append(ok)
+                else |_|
+                    return @This(){ .first = first, .rest = try list.toOwnedSlice() };
             }
         }
         fn deinit(self: @This(), allocator: std.mem.Allocator) void {
-            if (@sizeOf(T) > 0)
-                allocator.free(self.rest);
+            allocator.free(self.rest);
         }
     };
 }
@@ -212,31 +201,23 @@ pub fn OneOrMore(comptime T: type) type {
 pub fn ZeroOrMore(comptime T: type) type {
     return struct {
         const ParserError = std.mem.Allocator.Error || ParseError(T);
-        rest: if (@sizeOf(T) > 0) []const T else usize,
+        rest: []const T,
 
         pub fn parse(bytes: *[]const u8, extra: anytype) ParseFnRet(@This()) {
             comptime assertExtraHasAllocator(extra);
             const allocator = extra.allocator;
-            var list = if (@sizeOf(T) > 0) std.ArrayList(T).init(allocator) else @as(usize, 0);
+            var list = std.ArrayList(T).init(allocator);
 
             while (true) {
                 const t = getParseFn(T)(bytes, extra);
-                if (t) |ok| {
-                    if (@sizeOf(T) > 0)
-                        try list.append(ok)
-                    else
-                        list += 1;
-                } else |_| {
-                    return if (@sizeOf(T) > 0)
-                        @This(){ .rest = try list.toOwnedSlice() }
-                    else
-                        @This(){ .rest = list };
-                }
+                if (t) |ok|
+                    try list.append(ok)
+                else |_|
+                    return @This(){ .rest = try list.toOwnedSlice() };
             }
         }
         fn deinit(self: @This(), allocator: std.mem.Allocator) void {
-            if (@sizeOf(T) > 0)
-                allocator.free(self.rest);
+            allocator.free(self.rest);
         }
     };
 }
@@ -267,6 +248,8 @@ pub fn parseInt(comptime T: type, len: usize, comptime radix: u8) ParseFn(T) {
 }
 
 test "basic parse - workaround within struct to properly parse" {
+    // TODO: investigate parser which compacts struct with multiple SingleValues while
+    // maintaining parse order
     const Color = struct {
         hex: SingleValue(u8, '#') = .{},
         red: u8,
@@ -319,11 +302,11 @@ test "basic parse - zero or more" {
 
     const AParser = Parser(A);
 
-    const expected = A{ .a = .{ .rest = 3 } };
+    const expected = A{ .a = .{ .rest = &.{ .{}, .{}, .{} } } };
     const parsed = try AParser.parse("aaab", .{ .allocator = std.testing.allocator });
     defer parsed.a.deinit(std.testing.allocator);
 
-    try std.testing.expectEqual(parsed.a.rest, expected.a.rest);
+    try std.testing.expectEqualSlices(a, parsed.a.rest, expected.a.rest);
 }
 
 test "basic parse - one or more" {
@@ -334,11 +317,11 @@ test "basic parse - one or more" {
 
     const AParser = Parser(A);
 
-    const expected = A{ .a = .{ .first = .{}, .rest = 2 } };
+    const expected = A{ .a = .{ .first = .{}, .rest = &.{ .{}, .{} } } };
     const parsed = try AParser.parse("aaab", .{ .allocator = std.testing.allocator });
     defer parsed.a.deinit(std.testing.allocator);
 
-    try std.testing.expectEqual(parsed.a.rest, expected.a.rest);
+    try std.testing.expectEqualSlices(a, parsed.a.rest, expected.a.rest);
 }
 
 test "basic parse - pointers" {
@@ -475,8 +458,7 @@ test "basic parse - one of types" {
 }
 
 test "assert SingleValue zero-size" {
-    if (!stage1)
-        try std.testing.expect(@sizeOf(SingleValue([]const u8, "test")) == 0);
+    try std.testing.expect(@sizeOf(SingleValue([]const u8, "test")) == 1);
 }
 
 test "parser error" {
