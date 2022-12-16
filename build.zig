@@ -4,11 +4,11 @@ pub fn build(b: *std.build.Builder) void {
     const mode = b.standardReleaseOptions();
     const target = b.standardTargetOptions(.{});
 
-    const lib = b.addStaticLibrary("parzer", "src/lib.zig");
+    const lib = b.addStaticLibrary("parzer", "src/main.zig");
     lib.setBuildMode(mode);
     lib.install();
 
-    const main_tests = b.addTest("src/lib.zig");
+    const main_tests = b.addTest("src/main.zig");
     main_tests.setBuildMode(mode);
     main_tests.setTarget(target);
 

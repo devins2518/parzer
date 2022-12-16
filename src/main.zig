@@ -446,12 +446,12 @@ test "basic parse - one of types" {
     const SlashParser = Parser(Slash);
 
     {
-        const expected = Slash{ .slash = .{ .@"lib.SingleValue(u8,92)" = .{} } };
+        const expected = Slash{ .slash = .{ .@"main.SingleValue(u8,92)" = .{} } };
         const parsed = try SlashParser.parse("\\", .{});
         try std.testing.expectEqual(parsed, expected);
     }
     {
-        const expected = Slash{ .slash = .{ .@"lib.SingleValue(u8,47)" = .{} } };
+        const expected = Slash{ .slash = .{ .@"main.SingleValue(u8,47)" = .{} } };
         const parsed = try SlashParser.parse("/", .{});
         try std.testing.expectEqual(parsed, expected);
     }

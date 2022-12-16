@@ -1,0 +1,10 @@
+pkgs:
+  parzer:
+    version: 0.1.0
+    description: A parsing library for Zig.
+    license: MIT
+    source_url: "https://github.com/devins2518/parzer"
+    root: src/lib.zig
+    files:
+      README.md
+      LICENSE
