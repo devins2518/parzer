@@ -122,7 +122,12 @@ pub fn SingleValue(comptime T: type, comptime val: T) type {
             return if (T == u8) blk: {
                 try eatChar(bytes, val);
                 break :blk @This(){};
-            } else |e| e;
+            } else if (T == []const u8) blk: {
+                for (val) |c| {
+                    try eatChar(bytes, c);
+                }
+                break :blk @This(){};
+            };
         }
     };
 }
