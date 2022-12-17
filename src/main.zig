@@ -89,10 +89,10 @@ pub fn Parser(comptime T: type) type {
             return getParseFn(T)(&b, extra);
         }
         // null means that parsing will continue for rest of the struct.
-        pub fn parseWhile(bytes: *[]const u8, extra: anytype, comptime stop: ?[]const u8) ParseFnRet(T) {
+        pub fn parseWhile(bytes: *[]const u8, extra: anytype, comptime until: ?[]const u8) ParseFnRet(T) {
             var ret: T = undefined;
-            inline for (Fields) |field| {
-                if (stop != null and field.name == stop.?) break;
+            inline for (Fields) |field, i| {
+                if (until != null and std.mem.eql(u8, field.name, until.?)) break;
                 const parseFn = getChildParseFn(T, field);
                 if (comptime utils.isStruct(T)) {
                     @field(ret, field.name) = try parseFn(bytes, extra);
@@ -102,8 +102,12 @@ pub fn Parser(comptime T: type) type {
                     if (maybe_parsed) |parsed| {
                         ret = @unionInit(T, field.name, parsed);
                         break;
-                    } else |_| {
-                        bytes.* = old_bytes;
+                    } else |e| {
+                        if (i == Fields.len - 1) {
+                            return e;
+                        } else {
+                            bytes.* = old_bytes;
+                        }
                     }
                 } else unreachable;
             }
@@ -133,9 +137,10 @@ pub fn SingleValue(comptime T: type, comptime val: T) type {
 }
 
 pub fn eatChar(bytes: *[]const u8, char: u8) ParseFnRet(void) {
-    return if (bytes.*[0] == char) {
-        bytes.* = bytes.*[1..];
-    } else error.UnexpectedToken;
+    if (bytes.*[0] == char)
+        bytes.* = bytes.*[1..]
+    else
+        return error.UnexpectedToken;
 }
 
 // TODO: Investigate ways to make this better
@@ -225,6 +230,29 @@ pub fn ZeroOrMore(comptime T: type) type {
             allocator.free(self.rest);
         }
     };
+}
+
+pub fn Remove(comptime T: type, comptime remove: []const []const u8) type {
+    if (!comptime utils.isUnion(T)) @compileError("Remove may only be called with Unions!");
+    const UnionField = std.builtin.Type.UnionField;
+    const EnumField = std.builtin.Type.EnumField;
+    var U = @typeInfo(T).Union;
+    var E = @typeInfo(U.tag_type.?).Enum;
+    var UnionFields: []const UnionField = &.{};
+    var EnumFields: []const EnumField = &.{};
+
+    f: inline for (U.fields) |field| {
+        for (remove) |rem|
+            if (std.mem.eql(u8, field.name, rem)) continue :f;
+
+        EnumFields = EnumFields ++ &[_]EnumField{EnumField{ .name = field.name, .value = UnionFields.len }};
+        UnionFields = UnionFields ++ &[_]UnionField{field};
+    }
+
+    E.fields = EnumFields;
+    U.fields = UnionFields;
+    U.tag_type = @Type(std.builtin.Type{ .Enum = E });
+    return @Type(std.builtin.Type{ .Union = U });
 }
 
 pub fn assertExtraHasAllocator(extra: anytype) void {
@@ -423,19 +451,17 @@ test "basic parse - union within struct" {
 }
 
 test "basic parse - one of" {
-    const Control = struct {
-        cntrl: OneOf(u8, &[_]u8{
-            0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07,
-            0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f,
-            0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17,
-            0x18, 0x19, 0x1a, 0x1b, 0x1c, 0x1d, 0x1e, 0x1f,
-            0x7f,
-        }),
-    };
+    const Control = OneOf(u8, &[_]u8{
+        0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07,
+        0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f,
+        0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17,
+        0x18, 0x19, 0x1a, 0x1b, 0x1c, 0x1d, 0x1e, 0x1f,
+        0x7f,
+    });
 
     const ControlParser = Parser(Control);
 
-    const expected = Control{ .cntrl = .{ .@"0" = .{} } };
+    const expected = Control{ .@"0" = .{} };
     const parsed = try ControlParser.parse("\x00", .{});
     try std.testing.expectEqual(parsed, expected);
 }
@@ -459,6 +485,31 @@ test "basic parse - one of types" {
         const expected = Slash{ .slash = .{ .@"main.SingleValue(u8,47)" = .{} } };
         const parsed = try SlashParser.parse("/", .{});
         try std.testing.expectEqual(parsed, expected);
+    }
+    {
+        try std.testing.expectError(error.UnexpectedToken, SlashParser.parse("+", .{}));
+    }
+}
+
+test "basic parse - remove" {
+    const Control = OneOf(u8, &[_]u8{
+        0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07,
+        0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f,
+        0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17,
+        0x18, 0x19, 0x1a, 0x1b, 0x1c, 0x1d, 0x1e, 0x1f,
+        0x7f,
+    });
+    const AlmostControl = struct { almost: Remove(Control, &.{"127"}) };
+
+    const AlmostControlParser = Parser(AlmostControl);
+
+    {
+        const expected = AlmostControl{ .almost = .{ .@"0" = .{} } };
+        const parsed = try AlmostControlParser.parse("\x00", .{});
+        try std.testing.expectEqual(parsed, expected);
+    }
+    {
+        try std.testing.expectError(error.UnexpectedToken, AlmostControlParser.parse("\x7f", .{}));
     }
 }
 
