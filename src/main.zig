@@ -5,8 +5,8 @@ pub fn ParseFn(comptime T: type) type {
     return fn (*[]const u8, anytype) ParseFnRet(T);
 }
 
-pub fn getChildParseFn(comptime T: type, comptime field: anytype) ParseFn(field.field_type) {
-    const Field = field.field_type;
+pub fn getChildParseFn(comptime T: type, comptime field: anytype) ParseFn(field.type) {
+    const Field = field.type;
     const FieldInfo = @typeInfo(Field);
     const has_parser = @hasDecl(T, field.name ++ "Parser");
     const has_parse = if (comptime utils.isStructOrUnion(Field))
@@ -23,10 +23,10 @@ pub fn getChildParseFn(comptime T: type, comptime field: anytype) ParseFn(field.
         .Int => if (has_parser)
             @field(T, field.name ++ "Parser")
         else
-            @compileError("Parser not found for " ++ @typeName(T) ++ "." ++ @typeName(field.field_type)),
+            @compileError("Parser not found for " ++ @typeName(T) ++ "." ++ @typeName(field.type)),
         .Pointer => |Ptr| if (Ptr.size == .One and Ptr.is_const)
             struct {
-                fn f(bytes: *[]const u8, extra: anytype) ParseFnRet(field.field_type) {
+                fn f(bytes: *[]const u8, extra: anytype) ParseFnRet(field.type) {
                     const Child = Ptr.child;
                     comptime assertExtraHasAllocator(extra);
                     const parseFn = getParseFn(Child);
@@ -62,7 +62,7 @@ pub fn ParseError(comptime T: type) type {
 
         const Fields = if (comptime utils.isStruct(T)) TyInfo.Struct.fields else TyInfo.Union.fields;
         for (Fields) |field| {
-            errors = errors || ParseError(field.field_type);
+            errors = errors || ParseError(field.type);
         }
     } else if (TyInfo == .Pointer) {
         errors = errors || std.mem.Allocator.Error || ParseError(TyInfo.Pointer.child);
@@ -157,17 +157,16 @@ pub fn OneOf(comptime T: type, comptime slice: []const T) type {
     inline for (slice) |ty, i| {
         const name = std.fmt.comptimePrint("{}", .{ty});
         if (T == type) {
-            UnionFields[i] = UnionField{ .name = name, .field_type = ty, .alignment = @alignOf(ty) };
+            UnionFields[i] = UnionField{ .name = name, .type = ty, .alignment = @alignOf(ty) };
             EnumFields[i] = EnumField{ .name = name, .value = i };
         } else {
-            UnionFields[i] = UnionField{ .name = name, .field_type = SingleValue(T, ty), .alignment = @alignOf(T) };
+            UnionFields[i] = UnionField{ .name = name, .type = SingleValue(T, ty), .alignment = @alignOf(T) };
             EnumFields[i] = EnumField{ .name = name, .value = i };
         }
     }
     return @Type(Type{ .Union = Union{
         .layout = .Auto,
         .tag_type = @Type(Type{ .Enum = Enum{
-            .layout = .Auto,
             .tag_type = std.math.IntFittingRange(0, EnumFields.len - 1),
             .fields = &EnumFields,
             .decls = &[_]Decl{},
