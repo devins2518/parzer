@@ -231,6 +231,7 @@ pub fn ZeroOrMore(comptime T: type) type {
     };
 }
 
+// TODO: add support for removing by typename
 pub fn Remove(comptime T: type, comptime remove: []const []const u8) type {
     if (!comptime utils.isUnion(T)) @compileError("Remove may only be called with Unions!");
     const UnionField = std.builtin.Type.UnionField;
